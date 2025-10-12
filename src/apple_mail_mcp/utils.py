@@ -143,3 +143,55 @@ def sanitize_input(value: Any) -> str:
         s = s[:max_length]
 
     return s
+
+
+def sanitize_filename(filename: str) -> str:
+    """
+    Sanitize filename for safe file operations.
+
+    Removes path traversal attempts, dangerous characters, and null bytes.
+
+    Args:
+        filename: Filename to sanitize
+
+    Returns:
+        Sanitized filename
+
+    Example:
+        >>> sanitize_filename("../../../etc/passwd")
+        'etc_passwd'
+        >>> sanitize_filename("my-file_v2.txt")
+        'my-file_v2.txt'
+    """
+    import re
+    from pathlib import Path
+
+    # Remove null bytes
+    filename = filename.replace("\x00", "")
+
+    # Get basename only (no path components)
+    filename = Path(filename).name
+
+    # Replace dangerous characters with underscore
+    # Keep: letters, numbers, dash, underscore, period
+    filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+
+    # Remove leading dots (hidden files)
+    filename = filename.lstrip('.')
+
+    # Limit length
+    max_length = 255
+    if len(filename) > max_length:
+        # Preserve extension
+        name, ext = filename.rsplit('.', 1) if '.' in filename else (filename, '')
+        if ext:
+            name = name[:max_length - len(ext) - 1]
+            filename = f"{name}.{ext}"
+        else:
+            filename = filename[:max_length]
+
+    # Ensure not empty
+    if not filename:
+        filename = "unnamed_file"
+
+    return filename

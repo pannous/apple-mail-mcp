@@ -5,6 +5,7 @@ AppleScript-based connector for Apple Mail.
 import json
 import logging
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from .exceptions import (
@@ -420,6 +421,254 @@ class AppleMailConnector:
             end repeat
 
             return updateCount
+        end tell
+        """
+
+        result = self._run_applescript(script)
+        return int(result) if result.isdigit() else 0
+
+    def send_email_with_attachments(
+        self,
+        subject: str,
+        body: str,
+        to: list[str],
+        attachments: list[Path],
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        max_attachment_size: int = 25 * 1024 * 1024,
+    ) -> bool:
+        """
+        Send an email with file attachments.
+
+        Args:
+            subject: Email subject
+            body: Email body
+            to: List of To recipients
+            attachments: List of file paths to attach
+            cc: List of CC recipients
+            bcc: List of BCC recipients
+            max_attachment_size: Maximum size per attachment in bytes
+
+        Returns:
+            True if sent successfully
+
+        Raises:
+            FileNotFoundError: If attachment file doesn't exist
+            ValueError: If attachment exceeds size limit
+            MailAppleScriptError: If send fails
+        """
+        from .security import validate_attachment_size, validate_attachment_type
+
+        # Validate all attachments exist and are within size limit
+        for attachment_path in attachments:
+            if not attachment_path.exists():
+                raise FileNotFoundError(f"Attachment not found: {attachment_path}")
+
+            if not attachment_path.is_file():
+                raise ValueError(f"Attachment is not a file: {attachment_path}")
+
+            file_size = attachment_path.stat().st_size
+            if not validate_attachment_size(file_size, max_attachment_size):
+                raise ValueError(
+                    f"Attachment {attachment_path.name} exceeds size limit "
+                    f"({file_size} bytes > {max_attachment_size} bytes)"
+                )
+
+            if not validate_attachment_type(attachment_path.name):
+                raise ValueError(
+                    f"Attachment type not allowed: {attachment_path.name}"
+                )
+
+        subject_safe = escape_applescript_string(sanitize_input(subject))
+        body_safe = escape_applescript_string(sanitize_input(body))
+
+        # Build recipient lists
+        to_list = ", ".join(f'"{escape_applescript_string(addr)}"' for addr in to)
+        cc_list = ", ".join(f'"{escape_applescript_string(addr)}"' for addr in (cc or []))
+        bcc_list = ", ".join(f'"{escape_applescript_string(addr)}"' for addr in (bcc or []))
+
+        # Build attachment list (convert to POSIX file references)
+        attachment_list = ", ".join(
+            f'POSIX file "{escape_applescript_string(str(path.absolute()))}"'
+            for path in attachments
+        )
+
+        script = f"""
+        tell application "Mail"
+            set theMessage to make new outgoing message with properties {{subject:"{subject_safe}", content:"{body_safe}", visible:false}}
+
+            tell theMessage
+                -- Add To recipients
+                repeat with addr in {{{to_list}}}
+                    make new to recipient with properties {{address:addr}}
+                end repeat
+
+                -- Add CC recipients
+                repeat with addr in {{{cc_list}}}
+                    make new cc recipient with properties {{address:addr}}
+                end repeat
+
+                -- Add BCC recipients
+                repeat with addr in {{{bcc_list}}}
+                    make new bcc recipient with properties {{address:addr}}
+                end repeat
+
+                -- Add attachments
+                repeat with filePath in {{{attachment_list}}}
+                    make new attachment with properties {{file name:filePath}} at after last paragraph
+                end repeat
+
+                send
+            end tell
+
+            return "sent"
+        end tell
+        """
+
+        result = self._run_applescript(script)
+        return result == "sent"
+
+    def get_attachments(self, message_id: str) -> list[dict[str, Any]]:
+        """
+        Get list of attachments from a message.
+
+        Args:
+            message_id: Message ID
+
+        Returns:
+            List of attachment dictionaries with name, mime_type, size, downloaded
+
+        Raises:
+            MailMessageNotFoundError: If message doesn't exist
+        """
+        message_id_safe = escape_applescript_string(sanitize_input(message_id))
+
+        script = f"""
+        tell application "Mail"
+            -- Search all accounts for message
+            repeat with acc in accounts
+                repeat with mb in mailboxes of acc
+                    try
+                        set msg to first message of mb whose id is {message_id_safe}
+                        set attList to mail attachments of msg
+
+                        set resultList to {{}}
+                        repeat with att in attList
+                            set attName to name of att
+                            set attType to MIME type of att
+                            set attSize to file size of att
+                            set attDownloaded to downloaded of att
+
+                            set attData to attName & "|" & attType & "|" & attSize & "|" & attDownloaded
+                            set end of resultList to attData
+                        end repeat
+
+                        -- Join with newlines
+                        set AppleScript's text item delimiters to linefeed
+                        set output to resultList as text
+                        set AppleScript's text item delimiters to ""
+
+                        return output
+                    end try
+                end repeat
+            end repeat
+
+            error "Message not found"
+        end tell
+        """
+
+        result = self._run_applescript(script)
+
+        # Parse results
+        attachments = []
+        if result:
+            for line in result.split("\n"):
+                if not line:
+                    continue
+                parts = line.split("|")
+                if len(parts) >= 4:
+                    attachments.append({
+                        "name": parts[0],
+                        "mime_type": parts[1],
+                        "size": int(parts[2]) if parts[2].isdigit() else 0,
+                        "downloaded": parts[3].lower() == "true",
+                    })
+
+        return attachments
+
+    def save_attachments(
+        self,
+        message_id: str,
+        save_directory: Path,
+        attachment_indices: list[int] | None = None,
+    ) -> int:
+        """
+        Save attachments from a message to a directory.
+
+        Args:
+            message_id: Message ID
+            save_directory: Directory to save attachments to
+            attachment_indices: Indices of attachments to save (None = all)
+
+        Returns:
+            Number of attachments saved
+
+        Raises:
+            FileNotFoundError: If save directory doesn't exist
+            ValueError: If path validation fails
+            MailMessageNotFoundError: If message doesn't exist
+        """
+        # Validate save directory
+        if not save_directory.exists():
+            raise FileNotFoundError(f"Save directory does not exist: {save_directory}")
+
+        if not save_directory.is_dir():
+            raise ValueError(f"Save path is not a directory: {save_directory}")
+
+        # Prevent path traversal
+        try:
+            save_directory = save_directory.resolve()
+            # Check for suspicious paths
+            if ".." in str(save_directory):
+                raise ValueError("Path traversal detected")
+        except (RuntimeError, OSError) as e:
+            raise ValueError(f"Invalid save directory: {e}")
+
+        message_id_safe = escape_applescript_string(sanitize_input(message_id))
+        dir_safe = escape_applescript_string(str(save_directory))
+
+        # Build index filter if specified
+        if attachment_indices is not None:
+            # Convert to 1-based indexing for AppleScript
+            indices_str = ", ".join(str(i + 1) for i in attachment_indices)
+            index_filter = f"items {{{indices_str}}} of"
+        else:
+            index_filter = ""
+
+        script = f"""
+        tell application "Mail"
+            -- Search all accounts for message
+            repeat with acc in accounts
+                repeat with mb in mailboxes of acc
+                    try
+                        set msg to first message of mb whose id is {message_id_safe}
+                        set attList to {index_filter} mail attachments of msg
+                        set saveCount to 0
+
+                        repeat with att in attList
+                            try
+                                set attName to name of att
+                                save att in ("{dir_safe}/" & attName)
+                                set saveCount to saveCount + 1
+                            end try
+                        end repeat
+
+                        return saveCount
+                    end try
+                end repeat
+            end repeat
+
+            error "Message not found"
         end tell
         """
 
