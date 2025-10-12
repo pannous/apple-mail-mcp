@@ -377,6 +377,301 @@ def mark_as_read(message_ids: list[str], read: bool = True) -> dict[str, Any]:
         }
 
 
+@mcp.tool()
+def send_email_with_attachments(
+    subject: str,
+    body: str,
+    to: list[str],
+    attachments: list[str],
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Send an email with file attachments via Apple Mail.
+
+    IMPORTANT: This operation requires user confirmation before sending.
+
+    Args:
+        subject: Email subject
+        body: Email body (plain text)
+        to: List of recipient email addresses
+        attachments: List of file paths to attach
+        cc: List of CC recipients (optional)
+        bcc: List of BCC recipients (optional)
+
+    Returns:
+        Dictionary indicating success or failure
+
+    Example:
+        >>> send_email_with_attachments(
+        ...     subject="Report",
+        ...     body="Please find the attached report.",
+        ...     to=["colleague@example.com"],
+        ...     attachments=["/Users/me/Documents/report.pdf"]
+        ... )
+        {"success": True, "message": "Email sent with 1 attachment(s)"}
+    """
+    from pathlib import Path
+
+    try:
+        # Convert string paths to Path objects
+        attachment_paths = [Path(p) for p in attachments]
+
+        # Validate operation
+        is_valid, error_msg = validate_send_operation(to, cc, bcc)
+        if not is_valid:
+            logger.error(f"Validation failed: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "validation_error",
+            }
+
+        # Validate attachments exist
+        missing_files = [str(p) for p in attachment_paths if not p.exists()]
+        if missing_files:
+            return {
+                "success": False,
+                "error": f"Attachment files not found: {', '.join(missing_files)}",
+                "error_type": "file_not_found",
+            }
+
+        # Require confirmation
+        confirmation_details = {
+            "subject": subject,
+            "to": to,
+            "cc": cc or [],
+            "bcc": bcc or [],
+            "attachments": [p.name for p in attachment_paths],
+            "body_preview": body[:100] + "..." if len(body) > 100 else body,
+        }
+
+        logger.info(f"Requesting confirmation to send email with attachments: {subject}")
+        logger.info(f"Recipients: {to}, Attachments: {len(attachments)}")
+
+        if not require_confirmation("send_email_with_attachments", confirmation_details):
+            operation_logger.log_operation(
+                "send_email_with_attachments",
+                confirmation_details,
+                "cancelled"
+            )
+            return {
+                "success": False,
+                "error": "User cancelled operation",
+                "error_type": "cancelled",
+            }
+
+        # Send the email
+        result = mail.send_email_with_attachments(
+            subject=subject,
+            body=body,
+            to=to,
+            attachments=attachment_paths,
+            cc=cc,
+            bcc=bcc,
+        )
+
+        operation_logger.log_operation(
+            "send_email_with_attachments",
+            {"subject": subject, "to": to, "attachments": len(attachments)},
+            "success"
+        )
+
+        return {
+            "success": True,
+            "message": f"Email sent with {len(attachments)} attachment(s)",
+            "details": {
+                "subject": subject,
+                "recipients": len(to) + len(cc or []) + len(bcc or []),
+                "attachments": len(attachments),
+            },
+        }
+
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(f"Validation error: {e}")
+        operation_logger.log_operation(
+            "send_email_with_attachments",
+            {"subject": subject},
+            "failure"
+        )
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "validation_error",
+        }
+    except MailAppleScriptError as e:
+        logger.error(f"Error sending email: {e}")
+        operation_logger.log_operation(
+            "send_email_with_attachments",
+            {"subject": subject},
+            "failure"
+        )
+        return {
+            "success": False,
+            "error": f"Failed to send email: {str(e)}",
+            "error_type": "send_error",
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error sending email with attachments: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unknown",
+        }
+
+
+@mcp.tool()
+def get_attachments(message_id: str) -> dict[str, Any]:
+    """
+    Get list of attachments from a message.
+
+    Args:
+        message_id: Message ID from search results
+
+    Returns:
+        Dictionary with list of attachments
+
+    Example:
+        >>> get_attachments("12345")
+        {
+            "success": True,
+            "attachments": [
+                {
+                    "name": "report.pdf",
+                    "mime_type": "application/pdf",
+                    "size": 524288,
+                    "downloaded": True
+                }
+            ],
+            "count": 1
+        }
+    """
+    try:
+        logger.info(f"Getting attachments for message: {message_id}")
+
+        attachments = mail.get_attachments(message_id)
+
+        operation_logger.log_operation(
+            "get_attachments",
+            {"message_id": message_id},
+            "success"
+        )
+
+        return {
+            "success": True,
+            "attachments": attachments,
+            "count": len(attachments),
+        }
+
+    except MailMessageNotFoundError as e:
+        logger.error(f"Message not found: {e}")
+        return {
+            "success": False,
+            "error": f"Message '{message_id}' not found",
+            "error_type": "message_not_found",
+        }
+    except Exception as e:
+        logger.error(f"Error getting attachments: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unknown",
+        }
+
+
+@mcp.tool()
+def save_attachments(
+    message_id: str,
+    save_directory: str,
+    attachment_indices: list[int] | None = None,
+) -> dict[str, Any]:
+    """
+    Save attachments from a message to a directory.
+
+    Args:
+        message_id: Message ID from search results
+        save_directory: Directory path to save attachments to
+        attachment_indices: Specific attachment indices to save (0-based), None for all
+
+    Returns:
+        Dictionary indicating success and number of attachments saved
+
+    Example:
+        >>> save_attachments("12345", "/Users/me/Downloads")
+        {"success": True, "saved": 2, "directory": "/Users/me/Downloads"}
+
+        >>> save_attachments("12345", "/Users/me/Downloads", [0, 2])
+        {"success": True, "saved": 2, "directory": "/Users/me/Downloads"}
+    """
+    from pathlib import Path
+
+    try:
+        save_path = Path(save_directory)
+
+        # Validate directory
+        if not save_path.exists():
+            return {
+                "success": False,
+                "error": f"Directory does not exist: {save_directory}",
+                "error_type": "directory_not_found",
+            }
+
+        if not save_path.is_dir():
+            return {
+                "success": False,
+                "error": f"Path is not a directory: {save_directory}",
+                "error_type": "invalid_directory",
+            }
+
+        logger.info(
+            f"Saving attachments from message {message_id} to {save_directory}"
+        )
+
+        count = mail.save_attachments(
+            message_id=message_id,
+            save_directory=save_path,
+            attachment_indices=attachment_indices,
+        )
+
+        operation_logger.log_operation(
+            "save_attachments",
+            {
+                "message_id": message_id,
+                "directory": save_directory,
+                "indices": attachment_indices,
+            },
+            "success"
+        )
+
+        return {
+            "success": True,
+            "saved": count,
+            "directory": save_directory,
+        }
+
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(f"Validation error: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "validation_error",
+        }
+    except MailMessageNotFoundError as e:
+        logger.error(f"Message not found: {e}")
+        return {
+            "success": False,
+            "error": f"Message '{message_id}' not found",
+            "error_type": "message_not_found",
+        }
+    except Exception as e:
+        logger.error(f"Error saving attachments: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unknown",
+        }
+
+
 def main() -> None:
     """Run the MCP server."""
     logger.info("Starting Apple Mail MCP server")
