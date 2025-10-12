@@ -972,6 +972,145 @@ def delete_messages(
         }
 
 
+@mcp.tool()
+def reply_to_message(
+    message_id: str,
+    body: str,
+    reply_all: bool = False,
+) -> dict[str, Any]:
+    """
+    Reply to a message.
+
+    Args:
+        message_id: ID of the message to reply to
+        body: Reply body text
+        reply_all: If True, reply to all recipients; if False, reply only to sender (default: False)
+
+    Returns:
+        Dictionary with success status and reply message ID
+
+    Example:
+        reply_to_message(
+            message_id="12345",
+            body="Thanks for your email! I'll get back to you soon.",
+            reply_all=False
+        )
+    """
+    try:
+        logger.info(f"Creating reply to message {message_id}")
+
+        # Reply to the message
+        reply_id = mail.reply_to_message(
+            message_id=message_id,
+            body=body,
+            reply_all=reply_all,
+        )
+
+        return {
+            "success": True,
+            "reply_id": reply_id,
+            "original_message_id": message_id,
+            "reply_all": reply_all,
+        }
+
+    except MailMessageNotFoundError as e:
+        logger.error(f"Message not found: {e}")
+        return {
+            "success": False,
+            "error": f"Message '{message_id}' not found",
+            "error_type": "message_not_found",
+        }
+    except Exception as e:
+        logger.error(f"Error replying to message: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unknown",
+        }
+
+
+@mcp.tool()
+def forward_message(
+    message_id: str,
+    to: list[str],
+    body: str = "",
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Forward a message to recipients.
+
+    Args:
+        message_id: ID of the message to forward
+        to: List of recipient email addresses
+        body: Optional body text to add before forwarded content (default: "")
+        cc: Optional CC recipients
+        bcc: Optional BCC recipients
+
+    Returns:
+        Dictionary with success status and forwarded message ID
+
+    Example:
+        forward_message(
+            message_id="12345",
+            to=["colleague@example.com"],
+            body="FYI - thought you'd find this interesting."
+        )
+
+    Note:
+        Original message content and attachments are automatically included.
+    """
+    try:
+        if not to:
+            return {
+                "success": False,
+                "error": "At least one recipient required",
+                "error_type": "validation_error",
+            }
+
+        logger.info(f"Forwarding message {message_id} to {len(to)} recipient(s)")
+
+        # Forward the message
+        forward_id = mail.forward_message(
+            message_id=message_id,
+            to=to,
+            body=body,
+            cc=cc,
+            bcc=bcc,
+        )
+
+        return {
+            "success": True,
+            "forward_id": forward_id,
+            "original_message_id": message_id,
+            "recipients": to,
+            "cc": cc,
+            "bcc": bcc,
+        }
+
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "validation_error",
+        }
+    except MailMessageNotFoundError as e:
+        logger.error(f"Message not found: {e}")
+        return {
+            "success": False,
+            "error": f"Message '{message_id}' not found",
+            "error_type": "message_not_found",
+        }
+    except Exception as e:
+        logger.error(f"Error forwarding message: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unknown",
+        }
+
+
 def main() -> None:
     """Run the MCP server."""
     logger.info("Starting Apple Mail MCP server")

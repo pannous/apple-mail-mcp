@@ -948,3 +948,173 @@ class AppleMailConnector:
 
         result = self._run_applescript(script)
         return int(result) if result.isdigit() else 0
+
+    def reply_to_message(
+        self,
+        message_id: str,
+        body: str,
+        reply_all: bool = False,
+        quote_original: bool = True,
+    ) -> str:
+        """
+        Reply to a message.
+
+        Args:
+            message_id: ID of message to reply to
+            body: Reply body text
+            reply_all: If True, reply to all recipients; if False, reply only to sender
+            quote_original: If True, include original message quoted
+
+        Returns:
+            Message ID of the reply
+
+        Raises:
+            MailMessageNotFoundError: If message doesn't exist
+        """
+        from .utils import sanitize_input
+
+        body_safe = escape_applescript_string(sanitize_input(body))
+        reply_type = "reply to all" if reply_all else "reply"
+
+        # Apple Mail's reply command automatically handles quoting if opened in editor
+        # We'll create a reply and set its content
+        script = f"""
+        tell application "Mail"
+            set idList to {{"{message_id}"}}
+
+            repeat with acc in accounts
+                repeat with mb in mailboxes of acc
+                    try
+                        set origMsg to first message of mb whose id is "{message_id}"
+
+                        -- Create reply message
+                        set replyMsg to {reply_type} origMsg
+
+                        -- Set body content
+                        set content of replyMsg to "{body_safe}"
+
+                        -- Get the message ID
+                        set replyId to id of replyMsg
+
+                        -- Send the message
+                        send replyMsg
+
+                        return replyId
+                    end try
+                end repeat
+            end repeat
+
+            error "Message not found"
+        end tell
+        """
+
+        result = self._run_applescript(script)
+        return result
+
+    def forward_message(
+        self,
+        message_id: str,
+        to: list[str],
+        body: str = "",
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        include_attachments: bool = True,
+    ) -> str:
+        """
+        Forward a message to recipients.
+
+        Args:
+            message_id: ID of message to forward
+            to: List of recipient email addresses
+            body: Optional body text to add before forwarded content
+            cc: Optional CC recipients
+            bcc: Optional BCC recipients
+            include_attachments: If True, include original attachments
+
+        Returns:
+            Message ID of the forwarded message
+
+        Raises:
+            ValueError: If no recipients or invalid emails
+            MailMessageNotFoundError: If message doesn't exist
+        """
+        from .utils import format_applescript_list, sanitize_input, validate_email
+
+        if not to:
+            raise ValueError("At least one recipient required")
+
+        # Validate all email addresses
+        for email in to:
+            if not validate_email(email):
+                raise ValueError(f"Invalid email address: {email}")
+
+        if cc:
+            for email in cc:
+                if not validate_email(email):
+                    raise ValueError(f"Invalid CC email address: {email}")
+
+        if bcc:
+            for email in bcc:
+                if not validate_email(email):
+                    raise ValueError(f"Invalid BCC email address: {email}")
+
+        body_safe = escape_applescript_string(sanitize_input(body))
+        to_list = format_applescript_list(to)
+        cc_list = format_applescript_list(cc) if cc else '""'
+        bcc_list = format_applescript_list(bcc) if bcc else '""'
+
+        script = f"""
+        tell application "Mail"
+            repeat with acc in accounts
+                repeat with mb in mailboxes of acc
+                    try
+                        set origMsg to first message of mb whose id is "{message_id}"
+
+                        -- Create forward message
+                        set fwdMsg to forward origMsg
+
+                        -- Add body text before forwarded content
+                        if "{body_safe}" is not "" then
+                            set origContent to content of fwdMsg
+                            set content of fwdMsg to "{body_safe}" & return & return & origContent
+                        end if
+
+                        -- Set recipients
+                        set toRecipients to {to_list}
+                        repeat with recipientAddr in toRecipients
+                            make new to recipient at end of to recipients of fwdMsg with properties {{address:recipientAddr}}
+                        end repeat
+
+                        -- Set CC if provided
+                        if {cc_list} is not "" then
+                            set ccRecipients to {cc_list}
+                            repeat with recipientAddr in ccRecipients
+                                make new cc recipient at end of cc recipients of fwdMsg with properties {{address:recipientAddr}}
+                            end repeat
+                        end if
+
+                        -- Set BCC if provided
+                        if {bcc_list} is not "" then
+                            set bccRecipients to {bcc_list}
+                            repeat with recipientAddr in bccRecipients
+                                make new bcc recipient at end of bcc recipients of fwdMsg with properties {{address:recipientAddr}}
+                            end repeat
+                        end if
+
+                        -- Get the message ID
+                        set fwdId to id of fwdMsg
+
+                        -- Send the message
+                        send fwdMsg
+
+                        return fwdId
+                    end try
+                end repeat
+            end repeat
+
+            error "Message not found"
+        end tell
+        """
+
+        result = self._run_applescript(script)
+        return result

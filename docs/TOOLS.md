@@ -4,8 +4,8 @@ Complete reference for all MCP tools provided by the Apple Mail MCP server.
 
 ## Overview
 
-**Current Version:** v0.2.0 (Phase 2)
-**Total Tools:** 12 (5 from Phase 1 + 7 from Phase 2)
+**Current Version:** v0.3.0 (Phase 3)
+**Total Tools:** 14 (5 from Phase 1 + 7 from Phase 2 + 2 from Phase 3)
 
 ## Phase 1 Tools (v0.1.0) - Core Foundation
 
@@ -813,6 +813,123 @@ delete_messages(
 - Bulk deletions limited to 100 messages for safety
 - Default behavior moves to trash (recoverable)
 - Use `permanent=True` only when certain
+
+---
+
+## Phase 3 Tools (v0.3.0)
+
+### reply_to_message
+
+Reply to a message.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `message_id` | string | Yes | - | ID of the message to reply to |
+| `body` | string | Yes | - | Reply body text |
+| `reply_all` | boolean | No | False | If True, reply to all recipients; if False, reply only to sender |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "reply_id": "67890",
+  "original_message_id": "12345",
+  "reply_all": false
+}
+```
+
+**Examples:**
+
+```python
+# Reply to sender only
+reply_to_message(
+    message_id="12345",
+    body="Thanks for your email! I'll get back to you soon."
+)
+
+# Reply to all recipients
+reply_to_message(
+    message_id="12345",
+    body="Thanks everyone for the discussion.",
+    reply_all=True
+)
+
+# Quick acknowledgment
+reply_to_message(
+    message_id="12345",
+    body="Received, thank you!"
+)
+```
+
+**Notes:**
+- Reply automatically maintains proper email threading
+- Original subject is preserved with "Re:" prefix
+- Reply-To headers are respected
+- Message is sent immediately after creation
+
+---
+
+### forward_message
+
+Forward a message to recipients.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `message_id` | string | Yes | - | ID of the message to forward |
+| `to` | list[string] | Yes | - | List of recipient email addresses |
+| `body` | string | No | "" | Optional body text to add before forwarded content |
+| `cc` | list[string] | No | None | Optional CC recipients |
+| `bcc` | list[string] | No | None | Optional BCC recipients |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "forward_id": "67890",
+  "original_message_id": "12345",
+  "recipients": ["colleague@example.com"],
+  "cc": null,
+  "bcc": null
+}
+```
+
+**Examples:**
+
+```python
+# Simple forward
+forward_message(
+    message_id="12345",
+    to=["colleague@example.com"]
+)
+
+# Forward with context
+forward_message(
+    message_id="12345",
+    to=["team@company.com"],
+    body="FYI - thought this would be relevant to our project."
+)
+
+# Forward to multiple recipients with CC
+forward_message(
+    message_id="12345",
+    to=["colleague1@example.com", "colleague2@example.com"],
+    cc=["manager@example.com"],
+    body="Please review this email thread."
+)
+```
+
+**Notes:**
+- Original message content is automatically included
+- Attachments are preserved by default
+- Subject is prefixed with "Fwd:"
+- Email validation is enforced for all recipients
+- Message is sent immediately after creation
 
 ---
 
