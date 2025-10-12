@@ -2,7 +2,12 @@
 
 Complete reference for all MCP tools provided by the Apple Mail MCP server.
 
-## Current Tools (Phase 1 - v0.1.0)
+## Overview
+
+**Current Version:** v0.2.0 (Phase 2)
+**Total Tools:** 12 (5 from Phase 1 + 7 from Phase 2)
+
+## Phase 1 Tools (v0.1.0) - Core Foundation
 
 ### search_messages
 
@@ -446,6 +451,368 @@ list_mailboxes(account="my gmail account")
 
 - Bulk operations limited to 100 items
 - Consider implementing additional rate limits for production use
+
+---
+
+## Phase 2 Tools (v0.2.0)
+
+### send_email_with_attachments
+
+Send an email with file attachments via Apple Mail.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `subject` | string | Yes | - | Email subject line |
+| `body` | string | Yes | - | Email body content |
+| `to` | list[string] | Yes | - | List of recipient email addresses |
+| `attachments` | list[string] | Yes | - | List of file paths to attach |
+| `cc` | list[string] | No | None | CC recipients |
+| `bcc` | list[string] | No | None | BCC recipients |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "message_id": "67890",
+  "recipients": ["recipient@example.com"],
+  "attachment_count": 2
+}
+```
+
+**Examples:**
+
+```python
+# Send email with single attachment
+send_email_with_attachments(
+    subject="Monthly Report",
+    body="Please find the report attached.",
+    to=["manager@company.com"],
+    attachments=["/Users/me/Documents/report.pdf"]
+)
+
+# Send with multiple attachments
+send_email_with_attachments(
+    subject="Project Files",
+    body="Here are all the project files.",
+    to=["team@company.com"],
+    cc=["manager@company.com"],
+    attachments=[
+        "/Users/me/Projects/design.pdf",
+        "/Users/me/Projects/specs.docx"
+    ]
+)
+```
+
+**Security Notes:**
+- File size limit: 25MB per attachment (default)
+- Dangerous file types blocked by default (.exe, .bat, .sh, etc.)
+- Path traversal attacks prevented
+- All file paths validated before sending
+
+---
+
+### get_attachments
+
+Get list of attachments from a message.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message_id` | string | Yes | Message ID to get attachments from |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "attachments": [
+    {
+      "index": 1,
+      "name": "report.pdf",
+      "size": "2.5 MB"
+    },
+    {
+      "index": 2,
+      "name": "data.xlsx",
+      "size": "1.8 MB"
+    }
+  ],
+  "count": 2
+}
+```
+
+**Examples:**
+
+```python
+# List all attachments in a message
+attachments = get_attachments(message_id="12345")
+
+# Process each attachment
+for att in attachments["attachments"]:
+    print(f"Found: {att['name']} ({att['size']})")
+```
+
+---
+
+### save_attachments
+
+Save attachments from a message to a directory.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `message_id` | string | Yes | - | Message ID to save attachments from |
+| `save_directory` | string | Yes | - | Directory path to save attachments |
+| `attachment_indices` | list[int] | No | None | Specific attachment indices (None = all) |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "count": 2,
+  "directory": "/Users/me/Downloads",
+  "saved_files": [
+    "report.pdf",
+    "data.xlsx"
+  ]
+}
+```
+
+**Examples:**
+
+```python
+# Save all attachments
+save_attachments(
+    message_id="12345",
+    save_directory="/Users/me/Downloads"
+)
+
+# Save specific attachments only
+save_attachments(
+    message_id="12345",
+    save_directory="/Users/me/Downloads",
+    attachment_indices=[1, 3]  # Save 1st and 3rd only
+)
+```
+
+**Security Notes:**
+- Directory must exist and be writable
+- Path traversal attacks prevented
+- Filenames sanitized for safety
+- Existing files will be overwritten
+
+---
+
+### move_messages
+
+Move messages to a different mailbox/folder.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `message_ids` | list[string] | Yes | - | List of message IDs to move |
+| `destination_mailbox` | string | Yes | - | Destination mailbox name |
+| `account` | string | Yes | - | Account name containing the messages |
+| `gmail_mode` | boolean | No | False | Use Gmail-specific handling (copy + delete) |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "count": 3,
+  "destination": "Archive",
+  "account": "Gmail"
+}
+```
+
+**Examples:**
+
+```python
+# Move messages to Archive
+move_messages(
+    message_ids=["12345", "12346"],
+    destination_mailbox="Archive",
+    account="Gmail"
+)
+
+# Move to nested mailbox
+move_messages(
+    message_ids=["12347"],
+    destination_mailbox="Projects/Client Work",
+    account="Gmail"
+)
+
+# Use Gmail mode for label-based accounts
+move_messages(
+    message_ids=["12348"],
+    destination_mailbox="Important",
+    account="Gmail",
+    gmail_mode=True
+)
+```
+
+**Notes:**
+- For nested mailboxes, use "/" separator
+- Gmail mode uses copy + delete to properly handle labels
+- Standard IMAP accounts use direct move
+
+---
+
+### flag_message
+
+Set flag color on messages.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message_ids` | list[string] | Yes | List of message IDs to flag |
+| `flag_color` | string | Yes | Flag color (none, orange, red, yellow, blue, green, purple, gray) |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "count": 2,
+  "flag_color": "red"
+}
+```
+
+**Examples:**
+
+```python
+# Flag important messages as red
+flag_message(
+    message_ids=["12345", "12346"],
+    flag_color="red"
+)
+
+# Remove flag from messages
+flag_message(
+    message_ids=["12347"],
+    flag_color="none"
+)
+
+# Flag with different colors
+flag_message(message_ids=["12348"], flag_color="blue")
+flag_message(message_ids=["12349"], flag_color="green")
+```
+
+**Valid Colors:**
+- `none` - Remove flag
+- `orange` - Orange flag
+- `red` - Red flag (high priority)
+- `yellow` - Yellow flag
+- `blue` - Blue flag
+- `green` - Green flag
+- `purple` - Purple flag
+- `gray` - Gray flag
+
+---
+
+### create_mailbox
+
+Create a new mailbox/folder.
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `account` | string | Yes | - | Account name to create mailbox in |
+| `name` | string | Yes | - | Name of the new mailbox |
+| `parent_mailbox` | string | No | None | Parent mailbox for nesting (None = top-level) |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "account": "Gmail",
+  "mailbox": "Client Work",
+  "parent": "Projects"
+}
+```
+
+**Examples:**
+
+```python
+# Create top-level mailbox
+create_mailbox(
+    account="Gmail",
+    name="Archive"
+)
+
+# Create nested mailbox
+create_mailbox(
+    account="Gmail",
+    name="Client Work",
+    parent_mailbox="Projects"
+)
+
+# Create organizational structure
+create_mailbox(account="Gmail", name="2024")
+create_mailbox(account="Gmail", name="Q1", parent_mailbox="2024")
+create_mailbox(account="Gmail", name="Q2", parent_mailbox="2024")
+```
+
+**Security Notes:**
+- Mailbox names sanitized for safety
+- Path traversal attacks prevented
+- Special characters removed
+
+---
+
+### delete_messages
+
+Delete messages (move to trash or permanently delete).
+
+**Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `message_ids` | list[string] | Yes | - | List of message IDs to delete |
+| `permanent` | boolean | No | False | If True, permanently delete; if False, move to Trash |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "count": 2,
+  "permanent": false
+}
+```
+
+**Examples:**
+
+```python
+# Move messages to trash (safe)
+delete_messages(
+    message_ids=["12345", "12346"],
+    permanent=False
+)
+
+# Permanently delete (cannot be undone!)
+delete_messages(
+    message_ids=["12347"],
+    permanent=True
+)
+```
+
+**Safety Notes:**
+- **Permanent deletion cannot be undone!**
+- Bulk deletions limited to 100 messages for safety
+- Default behavior moves to trash (recoverable)
+- Use `permanent=True` only when certain
 
 ---
 
