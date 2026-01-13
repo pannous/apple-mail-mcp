@@ -4,8 +4,8 @@ Complete reference for all MCP tools provided by the Apple Mail MCP server.
 
 ## Overview
 
-**Current Version:** v0.3.0 (Phase 3)
-**Total Tools:** 14 (5 from Phase 1 + 7 from Phase 2 + 2 from Phase 3)
+**Current Version:** v0.2.0 (Phase 2)
+**Total Tools:** 15 (5 from Phase 1 + 8 from Phase 2 + 2 from Phase 3)
 
 ## Phase 1 Tools (v0.1.0) - Core Foundation
 
@@ -606,6 +606,100 @@ save_attachments(
 - Path traversal attacks prevented
 - Filenames sanitized for safety
 - Existing files will be overwritten
+
+---
+
+### extract_attachment_text
+
+Extract text content from a message attachment.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message_id` | string | Yes | Message ID containing the attachment |
+| `attachment_index` | integer | Yes | Index of attachment to extract (0-based) |
+
+**Returns:**
+
+```json
+{
+  "success": true,
+  "text": "This is the extracted text content from the attachment...",
+  "filename": "report.txt",
+  "mime_type": "text/plain",
+  "size": 245
+}
+```
+
+**Supported Formats:**
+
+- **Plain text files**: `.txt`, `.text`, `.md`, `.markdown`, `.log`
+- **Code files**: `.py`, `.js`, `.java`, `.go`, `.rs`, etc.
+- **Data files**: `.json`, `.csv`, `.xml`, `.html`, `.htm`
+- **PDF files**: `.pdf` (requires optional `pypdf` package)
+- **Word documents**: `.docx` (requires optional `python-docx` package)
+
+**Examples:**
+
+```python
+# Extract text from a text attachment
+result = extract_attachment_text(
+    message_id="12345",
+    attachment_index=0
+)
+print(result["text"])
+
+# Extract text from PDF
+result = extract_attachment_text(
+    message_id="12345",
+    attachment_index=1  # Second attachment
+)
+if result["success"]:
+    print(f"Extracted {result['size']} characters from {result['filename']}")
+    print(result["text"])
+
+# Process all text attachments
+attachments = get_attachments(message_id="12345")
+for i, att in enumerate(attachments["attachments"]):
+    if att["mime_type"].startswith("text/") or att["name"].endswith((".txt", ".pdf", ".docx")):
+        result = extract_attachment_text(message_id="12345", attachment_index=i)
+        if result["success"]:
+            print(f"\n--- {att['name']} ---")
+            print(result["text"][:200])  # Print first 200 chars
+```
+
+**Installation for PDF/DOCX Support:**
+
+```bash
+# Install optional dependencies
+pip install pypdf python-docx
+
+# Or install with extras
+pip install apple-mail-mcp[text-extraction]
+```
+
+**Limitations:**
+
+- Maximum extracted text size: 1MB (prevents memory issues)
+- Binary files (images, videos, executables) are not supported
+- OCR is not performed on scanned PDFs
+- Complex PDF layouts may have formatting issues
+
+**Error Codes:**
+
+- `attachment_not_found`: Attachment index out of range or attachment doesn't exist
+- `message_not_found`: Message doesn't exist
+- `unsupported_format`: File format not supported for text extraction
+- `validation_error`: File too large or other validation failure
+- `unknown`: Unexpected error during extraction
+
+**Security Notes:**
+
+- Attachments are temporarily saved to extract text, then automatically deleted
+- No permanent files are created
+- Size limits prevent memory exhaustion attacks
+- Dangerous file types (executables) are blocked
 
 ---
 

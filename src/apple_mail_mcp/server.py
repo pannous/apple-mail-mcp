@@ -686,6 +686,116 @@ def save_attachments(
 
 
 @mcp.tool()
+def extract_attachment_text(
+    message_id: str,
+    attachment_index: int,
+) -> dict[str, Any]:
+    """
+    Extract text content from a message attachment.
+
+    Supports text extraction from:
+    - Plain text files (.txt, .md, .log, .py, .json, .csv, etc.)
+    - PDF files (.pdf) - requires optional pypdf package
+    - Word documents (.docx) - requires optional python-docx package
+
+    Args:
+        message_id: Message ID from search results
+        attachment_index: Index of attachment to extract (0-based)
+
+    Returns:
+        Dictionary with extracted text and metadata
+
+    Example:
+        >>> extract_attachment_text("12345", 0)
+        {
+            "success": True,
+            "text": "This is the content of the attachment...",
+            "format": "txt",
+            "size": 245
+        }
+
+    Note:
+        - Maximum extracted text size is 1MB to prevent memory issues
+        - PDF and DOCX support requires installing optional dependencies:
+          pip install pypdf python-docx
+    """
+    try:
+        logger.info(
+            f"Extracting text from attachment {attachment_index} in message {message_id}"
+        )
+
+        # Extract text from the attachment
+        text = mail.extract_attachment_text(
+            message_id=message_id,
+            attachment_index=attachment_index,
+        )
+
+        # Get attachment info for metadata
+        attachments = mail.get_attachments(message_id)
+        if attachment_index < len(attachments):
+            attachment_info = attachments[attachment_index]
+            filename = attachment_info["name"]
+            mime_type = attachment_info.get("mime_type", "unknown")
+        else:
+            filename = "unknown"
+            mime_type = "unknown"
+
+        operation_logger.log_operation(
+            "extract_attachment_text",
+            {
+                "message_id": message_id,
+                "attachment_index": attachment_index,
+                "filename": filename,
+            },
+            "success"
+        )
+
+        return {
+            "success": True,
+            "text": text,
+            "filename": filename,
+            "mime_type": mime_type,
+            "size": len(text),
+        }
+
+    except FileNotFoundError as e:
+        logger.error(f"Attachment not found: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "attachment_not_found",
+        }
+    except NotImplementedError as e:
+        logger.error(f"Unsupported format: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unsupported_format",
+        }
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "validation_error",
+        }
+    except MailMessageNotFoundError as e:
+        logger.error(f"Message not found: {e}")
+        return {
+            "success": False,
+            "error": f"Message '{message_id}' not found",
+            "error_type": "message_not_found",
+        }
+    except Exception as e:
+        logger.error(f"Error extracting attachment text: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": "unknown",
+        }
+
+
+@mcp.tool()
 def move_messages(
     message_ids: list[str],
     destination_mailbox: str,
