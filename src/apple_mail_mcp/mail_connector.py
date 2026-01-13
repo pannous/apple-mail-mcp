@@ -14,7 +14,7 @@ from .exceptions import (
     MailMailboxNotFoundError,
     MailMessageNotFoundError,
 )
-from .utils import escape_applescript_string, sanitize_input
+from .utils import escape_applescript_string, sanitize_input, validate_message_id
 
 logger = logging.getLogger(__name__)
 
@@ -267,8 +267,13 @@ class AppleMailConnector:
             Message dictionary
 
         Raises:
+            ValueError: If message_id format is invalid
             MailMessageNotFoundError: If message doesn't exist
         """
+        # Validate message ID format
+        if not validate_message_id(message_id):
+            raise ValueError(f"Invalid message ID format: {message_id}")
+
         message_id_safe = escape_applescript_string(sanitize_input(message_id))
 
         # Note: Direct message ID lookup is tricky in AppleScript
@@ -393,10 +398,16 @@ class AppleMailConnector:
             Number of messages updated
 
         Raises:
+            ValueError: If any message_id format is invalid
             MailAppleScriptError: If operation fails
         """
         if not message_ids:
             return 0
+
+        # Validate all message IDs
+        invalid_ids = [mid for mid in message_ids if not validate_message_id(mid)]
+        if invalid_ids:
+            raise ValueError(f"Invalid message ID format(s): {', '.join(invalid_ids[:3])}")
 
         status = "true" if read else "false"
 
@@ -539,8 +550,13 @@ class AppleMailConnector:
             List of attachment dictionaries with name, mime_type, size, downloaded
 
         Raises:
+            ValueError: If message_id format is invalid
             MailMessageNotFoundError: If message doesn't exist
         """
+        # Validate message ID format
+        if not validate_message_id(message_id):
+            raise ValueError(f"Invalid message ID format: {message_id}")
+
         message_id_safe = escape_applescript_string(sanitize_input(message_id))
 
         script = f"""
@@ -614,10 +630,18 @@ class AppleMailConnector:
             Number of attachments saved
 
         Raises:
+            ValueError: If message_id or path validation fails
             FileNotFoundError: If save directory doesn't exist
-            ValueError: If path validation fails
             MailMessageNotFoundError: If message doesn't exist
         """
+        # Validate message ID format
+        if not validate_message_id(message_id):
+            raise ValueError(f"Invalid message ID format: {message_id}")
+
+        # Prevent path traversal BEFORE resolving
+        if ".." in str(save_directory):
+            raise ValueError("Path traversal detected in directory path")
+
         # Validate save directory
         if not save_directory.exists():
             raise FileNotFoundError(f"Save directory does not exist: {save_directory}")
@@ -625,12 +649,9 @@ class AppleMailConnector:
         if not save_directory.is_dir():
             raise ValueError(f"Save path is not a directory: {save_directory}")
 
-        # Prevent path traversal
+        # Resolve to canonical path (after traversal check)
         try:
-            save_directory = save_directory.resolve()
-            # Check for suspicious paths
-            if ".." in str(save_directory):
-                raise ValueError("Path traversal detected")
+            save_directory = save_directory.resolve(strict=True)
         except (RuntimeError, OSError) as e:
             raise ValueError(f"Invalid save directory: {e}")
 
@@ -695,11 +716,17 @@ class AppleMailConnector:
             Number of messages moved
 
         Raises:
+            ValueError: If any message_id format is invalid
             MailAccountNotFoundError: If account doesn't exist
             MailMailboxNotFoundError: If destination mailbox doesn't exist
         """
         if not message_ids:
             return 0
+
+        # Validate all message IDs
+        invalid_ids = [mid for mid in message_ids if not validate_message_id(mid)]
+        if invalid_ids:
+            raise ValueError(f"Invalid message ID format(s): {', '.join(invalid_ids[:3])}")
 
         from .utils import sanitize_input
 
@@ -776,10 +803,15 @@ class AppleMailConnector:
             Number of messages flagged
 
         Raises:
-            ValueError: If flag color is invalid
+            ValueError: If message_id format or flag color is invalid
         """
         if not message_ids:
             return 0
+
+        # Validate all message IDs
+        invalid_ids = [mid for mid in message_ids if not validate_message_id(mid)]
+        if invalid_ids:
+            raise ValueError(f"Invalid message ID format(s): {', '.join(invalid_ids[:3])}")
 
         from .utils import get_flag_index, validate_flag_color
 
@@ -887,10 +919,15 @@ class AppleMailConnector:
             Number of messages deleted
 
         Raises:
-            ValueError: If bulk check fails
+            ValueError: If message_id format is invalid or bulk check fails
         """
         if not message_ids:
             return 0
+
+        # Validate all message IDs
+        invalid_ids = [mid for mid in message_ids if not validate_message_id(mid)]
+        if invalid_ids:
+            raise ValueError(f"Invalid message ID format(s): {', '.join(invalid_ids[:3])}")
 
         # Safety check for bulk operations
         if not skip_bulk_check and len(message_ids) > 100:
@@ -969,8 +1006,13 @@ class AppleMailConnector:
             Message ID of the reply
 
         Raises:
+            ValueError: If message_id format is invalid
             MailMessageNotFoundError: If message doesn't exist
         """
+        # Validate message ID format
+        if not validate_message_id(message_id):
+            raise ValueError(f"Invalid message ID format: {message_id}")
+
         from .utils import sanitize_input
 
         body_safe = escape_applescript_string(sanitize_input(body))
@@ -1035,9 +1077,13 @@ class AppleMailConnector:
             Message ID of the forwarded message
 
         Raises:
-            ValueError: If no recipients or invalid emails
+            ValueError: If message_id format is invalid, no recipients, or invalid emails
             MailMessageNotFoundError: If message doesn't exist
         """
+        # Validate message ID format
+        if not validate_message_id(message_id):
+            raise ValueError(f"Invalid message ID format: {message_id}")
+
         from .utils import format_applescript_list, sanitize_input, validate_email
 
         if not to:
