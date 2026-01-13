@@ -1,0 +1,1 @@
+This is the MCP connector to Apple emails. 
