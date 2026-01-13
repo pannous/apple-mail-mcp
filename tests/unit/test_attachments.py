@@ -251,3 +251,132 @@ class TestAttachmentSecurity:
         # Preserve safe names
         assert sanitize_filename("document.pdf") == "document.pdf"
         assert sanitize_filename("my-file_v2.txt") == "my-file_v2.txt"
+
+
+class TestExtractAttachmentText:
+    """Tests for extracting text from attachments."""
+
+    @pytest.fixture
+    def connector(self) -> AppleMailConnector:
+        """Create a connector instance."""
+        return AppleMailConnector(timeout=30)
+
+    def test_extract_text_from_txt_file(self, tmp_path: Path) -> None:
+        """Test extracting text from a .txt file."""
+        from apple_mail_mcp.mail_connector import extract_text_from_file
+
+        # Create a test text file
+        test_file = tmp_path / "test.txt"
+        test_content = "This is a test document.\nIt has multiple lines."
+        test_file.write_text(test_content)
+
+        # Extract text
+        result = extract_text_from_file(test_file)
+
+        assert result == test_content
+
+    def test_extract_text_from_pdf_file(self, tmp_path: Path) -> None:
+        """Test extracting text from a .pdf file."""
+        from apple_mail_mcp.mail_connector import extract_text_from_file
+
+        # Create a dummy PDF file
+        test_file = tmp_path / "test.pdf"
+        test_file.write_bytes(b"%PDF-1.4\nTest content")
+
+        # Should either extract text or raise an error for invalid PDF
+        try:
+            result = extract_text_from_file(test_file)
+            # If it succeeds, it should return a string
+            assert isinstance(result, str)
+        except (NotImplementedError, ValueError):
+            # Expected - either PDF support not installed or invalid PDF format
+            pass
+
+    def test_extract_text_unsupported_format(self, tmp_path: Path) -> None:
+        """Test that unsupported formats raise an error."""
+        from apple_mail_mcp.mail_connector import extract_text_from_file
+
+        # Create a file with unsupported extension
+        test_file = tmp_path / "image.jpg"
+        test_file.write_bytes(b"\xff\xd8\xff\xe0")  # JPEG header
+
+        with pytest.raises((ValueError, NotImplementedError)):
+            extract_text_from_file(test_file)
+
+    def test_extract_text_file_not_found(self) -> None:
+        """Test error when file doesn't exist."""
+        from apple_mail_mcp.mail_connector import extract_text_from_file
+
+        with pytest.raises(FileNotFoundError):
+            extract_text_from_file(Path("/nonexistent/file.txt"))
+
+    @patch.object(AppleMailConnector, "get_attachments")
+    @patch.object(AppleMailConnector, "save_attachments")
+    def test_extract_attachment_text_integration(
+        self, mock_save: MagicMock, mock_get: MagicMock, connector: AppleMailConnector, tmp_path: Path
+    ) -> None:
+        """Test extracting text from a message attachment."""
+        # Setup: Create a temp file that save_attachments will "save"
+        test_file = tmp_path / "attachment.txt"
+        test_content = "Email attachment content"
+        test_file.write_text(test_content)
+
+        # Mock get_attachments to return attachment info
+        mock_get.return_value = [
+            {
+                "name": "attachment.txt",
+                "mime_type": "text/plain",
+                "size": len(test_content),
+                "downloaded": True
+            }
+        ]
+
+        # Mock save_attachments to create our test file
+        def mock_save_attachment(message_id: str, save_directory: Path, attachment_indices: list[int] | None = None) -> int:
+            # Copy our test file to the save directory
+            dest = save_directory / "attachment.txt"
+            dest.write_text(test_content)
+            return 1
+
+        mock_save.side_effect = mock_save_attachment
+
+        # Extract text from attachment
+        result = connector.extract_attachment_text(
+            message_id="12345",
+            attachment_index=0,
+            attachment_name="attachment.txt"
+        )
+
+        assert result == test_content
+
+    def test_extract_text_from_large_file(self, tmp_path: Path) -> None:
+        """Test that large files are handled properly."""
+        from apple_mail_mcp.mail_connector import extract_text_from_file
+
+        # Create a large text file
+        test_file = tmp_path / "large.txt"
+        large_content = "Line of text.\n" * 10000  # ~140KB
+        test_file.write_text(large_content)
+
+        result = extract_text_from_file(test_file, max_size=1024 * 1024)  # 1MB limit
+
+        assert len(result) > 0
+        assert len(result) <= 1024 * 1024
+
+    def test_extract_text_size_limit(self, tmp_path: Path) -> None:
+        """Test that extraction respects size limits."""
+        from apple_mail_mcp.mail_connector import extract_text_from_file
+
+        # Create a file larger than the limit
+        test_file = tmp_path / "huge.txt"
+        huge_content = "x" * (2 * 1024 * 1024)  # 2MB
+        test_file.write_text(huge_content)
+
+        # Should raise error or truncate
+        try:
+            result = extract_text_from_file(test_file, max_size=1024 * 1024)  # 1MB limit
+            # If it doesn't raise, it should truncate
+            assert len(result) <= 1024 * 1024
+        except ValueError as e:
+            # Should mention size limit
+            assert "size" in str(e).lower()

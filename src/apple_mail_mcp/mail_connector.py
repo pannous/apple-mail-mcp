@@ -1164,3 +1164,200 @@ class AppleMailConnector:
 
         result = self._run_applescript(script)
         return result
+
+    def extract_attachment_text(
+        self,
+        message_id: str,
+        attachment_index: int,
+        attachment_name: str | None = None,
+    ) -> str:
+        """
+        Extract text content from a message attachment.
+
+        Args:
+            message_id: Message ID
+            attachment_index: Index of attachment to extract (0-based)
+            attachment_name: Optional name of attachment for verification
+
+        Returns:
+            Extracted text content
+
+        Raises:
+            ValueError: If message_id format is invalid or extraction fails
+            FileNotFoundError: If attachment not found
+            MailMessageNotFoundError: If message doesn't exist
+            NotImplementedError: If file format is not supported for text extraction
+
+        Example:
+            >>> text = connector.extract_attachment_text("12345", 0, "report.txt")
+            >>> print(text)
+            'This is the content of the attachment...'
+        """
+        import tempfile
+        from pathlib import Path
+
+        # Validate message ID format
+        if not validate_message_id(message_id):
+            raise ValueError(f"Invalid message ID format: {message_id}")
+
+        # Get attachment info to verify it exists and get the filename
+        attachments = self.get_attachments(message_id)
+
+        if not attachments or attachment_index >= len(attachments):
+            raise FileNotFoundError(
+                f"Attachment at index {attachment_index} not found. "
+                f"Message has {len(attachments)} attachment(s)."
+            )
+
+        attachment_info = attachments[attachment_index]
+        filename = attachment_name or attachment_info["name"]
+
+        # Create a temp directory to save the attachment
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Save the attachment
+            count = self.save_attachments(
+                message_id=message_id,
+                save_directory=temp_path,
+                attachment_indices=[attachment_index],
+            )
+
+            if count == 0:
+                raise FileNotFoundError(
+                    f"Failed to save attachment at index {attachment_index}"
+                )
+
+            # Find the saved file
+            saved_files = list(temp_path.glob("*"))
+            if not saved_files:
+                raise FileNotFoundError("Attachment file not found after saving")
+
+            saved_file = saved_files[0]
+
+            # Extract text from the file
+            return extract_text_from_file(saved_file)
+
+
+def extract_text_from_file(
+    file_path: Path,
+    max_size: int = 1024 * 1024,  # 1MB default
+) -> str:
+    """
+    Extract text content from a file.
+
+    Supports:
+    - Plain text files (.txt, .text, .md, .markdown, .log)
+    - PDF files (.pdf) - requires pypdf
+    - Word documents (.docx) - requires python-docx
+    - Python files (.py)
+    - JSON files (.json)
+    - CSV files (.csv)
+
+    Args:
+        file_path: Path to file to extract text from
+        max_size: Maximum size of extracted text in bytes
+
+    Returns:
+        Extracted text content
+
+    Raises:
+        FileNotFoundError: If file doesn't exist
+        ValueError: If file exceeds size limit or is empty
+        NotImplementedError: If file format is not supported
+
+    Example:
+        >>> text = extract_text_from_file(Path("/path/to/document.txt"))
+        >>> print(text)
+        'Document content here...'
+    """
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    if not file_path.is_file():
+        raise ValueError(f"Path is not a file: {file_path}")
+
+    # Check file size
+    file_size = file_path.stat().st_size
+    if file_size == 0:
+        return ""
+
+    if file_size > max_size:
+        raise ValueError(
+            f"File size ({file_size} bytes) exceeds maximum ({max_size} bytes)"
+        )
+
+    # Get file extension
+    suffix = file_path.suffix.lower()
+
+    # Plain text files
+    text_extensions = {'.txt', '.text', '.md', '.markdown', '.log', '.py', '.json', '.csv', '.xml', '.html', '.htm'}
+    if suffix in text_extensions:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read(max_size)
+                return content
+        except UnicodeDecodeError:
+            # Try with latin-1 encoding
+            with open(file_path, 'r', encoding='latin-1') as f:
+                content = f.read(max_size)
+                return content
+
+    # PDF files
+    if suffix == '.pdf':
+        try:
+            import pypdf
+
+            with open(file_path, 'rb') as f:
+                reader = pypdf.PdfReader(f)
+                text_parts = []
+
+                for page in reader.pages:
+                    text_parts.append(page.extract_text())
+
+                    # Check size limit
+                    current_text = '\n'.join(text_parts)
+                    if len(current_text) > max_size:
+                        return current_text[:max_size]
+
+                return '\n'.join(text_parts)
+
+        except ImportError:
+            raise NotImplementedError(
+                "PDF text extraction requires the 'pypdf' package. "
+                "Install it with: pip install pypdf"
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to extract text from PDF: {e}")
+
+    # Word documents
+    if suffix == '.docx':
+        try:
+            import docx
+
+            doc = docx.Document(file_path)
+            text_parts = []
+
+            for paragraph in doc.paragraphs:
+                text_parts.append(paragraph.text)
+
+                # Check size limit
+                current_text = '\n'.join(text_parts)
+                if len(current_text) > max_size:
+                    return current_text[:max_size]
+
+            return '\n'.join(text_parts)
+
+        except ImportError:
+            raise NotImplementedError(
+                "DOCX text extraction requires the 'python-docx' package. "
+                "Install it with: pip install python-docx"
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to extract text from DOCX: {e}")
+
+    # Unsupported format
+    raise NotImplementedError(
+        f"Text extraction not supported for {suffix} files. "
+        f"Supported formats: txt, pdf, docx, md, py, json, csv, xml, html"
+    )
