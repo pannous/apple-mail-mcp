@@ -981,6 +981,8 @@ def reply_to_message(
     """
     Reply to a message.
 
+    IMPORTANT: This operation requires user confirmation before sending.
+
     Args:
         message_id: ID of the message to reply to
         body: Reply body text
@@ -999,11 +1001,46 @@ def reply_to_message(
     try:
         logger.info(f"Creating reply to message {message_id}")
 
+        # Get original message to show context in confirmation
+        try:
+            original = mail.get_message(message_id, include_content=False)
+        except Exception:
+            # If we can't get original message, proceed with less context
+            original = {"sender": "Unknown", "subject": "Unknown"}
+
+        # Require confirmation
+        confirmation_details = {
+            "action": "Reply All" if reply_all else "Reply",
+            "to": original.get("sender", "Unknown"),
+            "original_subject": original.get("subject", "Unknown"),
+            "body_preview": body[:100] + "..." if len(body) > 100 else body,
+        }
+
+        logger.info(f"Requesting confirmation for reply to message {message_id}")
+
+        if not require_confirmation("reply_to_message", confirmation_details):
+            operation_logger.log_operation(
+                "reply_to_message",
+                {"message_id": message_id, "reply_all": reply_all},
+                "cancelled"
+            )
+            return {
+                "success": False,
+                "error": "User cancelled operation",
+                "error_type": "cancelled",
+            }
+
         # Reply to the message
         reply_id = mail.reply_to_message(
             message_id=message_id,
             body=body,
             reply_all=reply_all,
+        )
+
+        operation_logger.log_operation(
+            "reply_to_message",
+            {"message_id": message_id, "reply_all": reply_all},
+            "success"
         )
 
         return {
@@ -1040,6 +1077,8 @@ def forward_message(
     """
     Forward a message to recipients.
 
+    IMPORTANT: This operation requires user confirmation before sending.
+
     Args:
         message_id: ID of the message to forward
         to: List of recipient email addresses
@@ -1070,6 +1109,48 @@ def forward_message(
 
         logger.info(f"Forwarding message {message_id} to {len(to)} recipient(s)")
 
+        # Get original message to show context in confirmation
+        try:
+            original = mail.get_message(message_id, include_content=False)
+        except Exception:
+            # If we can't get original message, proceed with less context
+            original = {"sender": "Unknown", "subject": "Unknown"}
+
+        # Validate email addresses
+        is_valid, error_msg = validate_send_operation(to, cc, bcc)
+        if not is_valid:
+            logger.error(f"Validation failed: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "validation_error",
+            }
+
+        # Require confirmation
+        confirmation_details = {
+            "action": "Forward",
+            "to": to,
+            "cc": cc or [],
+            "bcc": bcc or [],
+            "original_subject": original.get("subject", "Unknown"),
+            "original_sender": original.get("sender", "Unknown"),
+            "body_preview": body[:100] + "..." if len(body) > 100 else body,
+        }
+
+        logger.info(f"Requesting confirmation for forward of message {message_id}")
+
+        if not require_confirmation("forward_message", confirmation_details):
+            operation_logger.log_operation(
+                "forward_message",
+                {"message_id": message_id, "to": to},
+                "cancelled"
+            )
+            return {
+                "success": False,
+                "error": "User cancelled operation",
+                "error_type": "cancelled",
+            }
+
         # Forward the message
         forward_id = mail.forward_message(
             message_id=message_id,
@@ -1077,6 +1158,12 @@ def forward_message(
             body=body,
             cc=cc,
             bcc=bcc,
+        )
+
+        operation_logger.log_operation(
+            "forward_message",
+            {"message_id": message_id, "to": to, "cc": cc, "bcc": bcc},
+            "success"
         )
 
         return {
