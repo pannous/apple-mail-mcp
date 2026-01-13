@@ -7,6 +7,7 @@ from apple_mail_mcp.utils import (
     format_applescript_list,
     parse_applescript_list,
     parse_date_filter,
+    sanitize_error_message,
     sanitize_input,
     validate_email,
 )
@@ -34,6 +35,29 @@ class TestEscapeAppleScriptString:
     def test_no_special_chars(self) -> None:
         result = escape_applescript_string("Hello World")
         assert result == "Hello World"
+
+    def test_escapes_newlines(self) -> None:
+        result = escape_applescript_string("Line1\nLine2")
+        assert result == "Line1\\nLine2"
+
+        result = escape_applescript_string("Line1\r\nLine2")
+        assert result == "Line1\\r\\nLine2"
+
+    def test_escapes_tabs(self) -> None:
+        result = escape_applescript_string("Column1\tColumn2")
+        assert result == "Column1\\tColumn2"
+
+    def test_escapes_null_bytes(self) -> None:
+        result = escape_applescript_string("Hello\x00World")
+        assert result == "HelloWorld"
+
+    def test_escapes_control_chars(self) -> None:
+        result = escape_applescript_string("Text\x01\x02\x03")
+        assert result == "Text"
+
+    def test_escapes_all_combined(self) -> None:
+        result = escape_applescript_string('Path\\to\\"file"\nwith\ttabs\x00and\x01control')
+        assert result == 'Path\\\\to\\\\\\"file\\"\\nwith\\ttabsandcontrol'
 
 
 class TestParseAppleScriptList:
@@ -106,6 +130,26 @@ class TestValidateEmail:
         assert validate_email("user@") is False
         assert validate_email("user example.com") is False
 
+    def test_invalid_consecutive_dots(self) -> None:
+        assert validate_email("user..name@example.com") is False
+        assert validate_email("user@example..com") is False
+
+    def test_invalid_leading_trailing_dots(self) -> None:
+        assert validate_email(".user@example.com") is False
+        assert validate_email("user.@example.com") is False
+        assert validate_email("user@.example.com") is False
+
+    def test_invalid_domain_format(self) -> None:
+        assert validate_email("user@-example.com") is False
+        assert validate_email("user@example-.com") is False
+
+    def test_invalid_length(self) -> None:
+        long_local = "a" * 65 + "@example.com"
+        assert validate_email(long_local) is False
+
+        long_email = "user@" + "a" * 250 + ".com"
+        assert validate_email(long_email) is False
+
 
 class TestValidateMessageId:
     """Tests for validate_message_id."""
@@ -158,3 +202,40 @@ class TestSanitizeInput:
         long_string = "a" * 20000
         result = sanitize_input(long_string)
         assert len(result) == 10000
+
+
+class TestSanitizeErrorMessage:
+    """Tests for sanitize_error_message."""
+
+    def test_removes_file_paths(self) -> None:
+        error = "Error in /Users/me/secrets/config.py: Invalid value"
+        result = sanitize_error_message(error)
+        assert "/Users/me/secrets/config.py" not in result
+        assert "[PATH]" in result
+
+    def test_removes_message_ids(self) -> None:
+        error = "Message ABC123XYZ456789 not found"
+        result = sanitize_error_message(error)
+        assert "ABC123XYZ456789" not in result
+        assert "[ID]" in result
+
+    def test_removes_email_addresses(self) -> None:
+        error = "Failed to send to user@secret-company.com"
+        result = sanitize_error_message(error)
+        assert "user@secret-company.com" not in result
+        assert "[EMAIL]" in result
+
+    def test_removes_all_combined(self) -> None:
+        error = "Error in /path/to/file.py: Message ID1234567890 failed for user@example.com"
+        result = sanitize_error_message(error)
+        assert "/path/to/file.py" not in result
+        assert "ID1234567890" not in result
+        assert "user@example.com" not in result
+        assert "[PATH]" in result
+        assert "[ID]" in result
+        assert "[EMAIL]" in result
+
+    def test_preserves_safe_content(self) -> None:
+        error = "Connection timeout after 30 seconds"
+        result = sanitize_error_message(error)
+        assert result == error

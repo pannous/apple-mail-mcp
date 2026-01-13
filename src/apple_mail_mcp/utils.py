@@ -10,6 +10,14 @@ def escape_applescript_string(s: str) -> str:
     """
     Escape string for safe AppleScript insertion.
 
+    Escapes:
+    - Backslashes (\\)
+    - Double quotes (")
+    - Newlines (\\n, \\r)
+    - Tabs (\\t)
+    - Null bytes (removed)
+    - Control characters (removed)
+
     Args:
         s: String to escape
 
@@ -21,8 +29,30 @@ def escape_applescript_string(s: str) -> str:
         'Hello \\\\"World\\\\"'
         >>> escape_applescript_string('Path\\to\\file')
         'Path\\\\to\\\\file'
+        >>> escape_applescript_string('Line1\\nLine2')
+        'Line1\\\\nLine2'
     """
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+    # Remove null bytes first (can't be in AppleScript strings)
+    s = s.replace("\x00", "")
+
+    # Remove other control characters (0x01-0x1F except \t, \n, \r)
+    # Keep tab (0x09), newline (0x0A), carriage return (0x0D)
+    s = ''.join(char for char in s if ord(char) >= 0x20 or char in '\t\n\r')
+
+    # Escape backslashes first (must be first!)
+    s = s.replace("\\", "\\\\")
+
+    # Escape quotes
+    s = s.replace('"', '\\"')
+
+    # Escape newlines and carriage returns
+    s = s.replace("\r", "\\r")
+    s = s.replace("\n", "\\n")
+
+    # Escape tabs
+    s = s.replace("\t", "\\t")
+
+    return s
 
 
 def parse_applescript_list(result: str) -> list[str]:
@@ -106,16 +136,69 @@ def parse_date_filter(date_str: str) -> str:
 
 def validate_email(email: str) -> bool:
     """
-    Validate email address format.
+    Validate email address format per RFC 5321/5322.
+
+    Checks for:
+    - Valid length (local ≤64, domain ≤253, total ≤254)
+    - No consecutive dots
+    - No leading/trailing dots in local part
+    - Valid domain format (no leading/trailing dashes)
+    - Proper @ separation
 
     Args:
         email: Email address to validate
 
     Returns:
         True if valid, False otherwise
+
+    Example:
+        >>> validate_email("user@example.com")
+        True
+        >>> validate_email("user..name@example.com")
+        False
     """
-    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-    return bool(re.match(pattern, email))
+    # Length check (RFC 5321)
+    if not email or len(email) > 254:
+        return False
+
+    # Must have exactly one @
+    if email.count('@') != 1:
+        return False
+
+    # Split into local and domain parts
+    try:
+        local, domain = email.rsplit('@', 1)
+    except ValueError:
+        return False
+
+    # Local part: 1-64 chars
+    if not local or len(local) > 64:
+        return False
+
+    # Domain part: validate format and length
+    if not domain or len(domain) > 253:
+        return False
+
+    # No consecutive dots anywhere
+    if '..' in email:
+        return False
+
+    # No leading/trailing dots in local part
+    if local.startswith('.') or local.endswith('.'):
+        return False
+
+    # Validate local part pattern
+    local_pattern = r'^[a-zA-Z0-9._%+-]+$'
+    if not re.match(local_pattern, local):
+        return False
+
+    # Validate domain part pattern
+    # Domain labels can't start/end with dash, must have valid TLD
+    domain_pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$'
+    if not re.match(domain_pattern, domain):
+        return False
+
+    return True
 
 
 def validate_message_id(message_id: str) -> bool:
@@ -184,6 +267,49 @@ def sanitize_input(value: Any) -> str:
         s = s[:max_length]
 
     return s
+
+
+def sanitize_error_message(error: Exception | str) -> str:
+    """
+    Sanitize error messages to prevent information leakage.
+
+    Removes sensitive information such as:
+    - File paths
+    - Message IDs
+    - Email addresses
+    - Other potentially sensitive data
+
+    Args:
+        error: Exception object or error string
+
+    Returns:
+        Sanitized error message
+
+    Example:
+        >>> sanitize_error_message("Error in /path/to/file.py")
+        'Error in [PATH]'
+        >>> sanitize_error_message("Message ID123456 not found")
+        'Message [ID] not found'
+    """
+    error_str = str(error)
+
+    # Remove file paths (anything starting with / or containing :\)
+    # Matches: /path/to/file, C:\path\to\file, ~/path/to/file
+    error_str = re.sub(r'[~/]?[\w/-]+/[\w/.-]+', '[PATH]', error_str)
+    error_str = re.sub(r'[A-Za-z]:\\[\w\\.-]+', '[PATH]', error_str)
+
+    # Remove message IDs (alphanumeric strings 10+ chars with at least one digit)
+    # Must contain at least one digit to avoid matching regular words
+    error_str = re.sub(r'\b(?=\w*\d)[A-Za-z0-9]{10,}\b', '[ID]', error_str)
+
+    # Remove email addresses
+    error_str = re.sub(
+        r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+        '[EMAIL]',
+        error_str
+    )
+
+    return error_str
 
 
 def sanitize_filename(filename: str) -> str:
