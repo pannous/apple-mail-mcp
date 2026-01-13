@@ -104,6 +104,21 @@ class TestAppleMailConnector:
         assert result[0]["read_status"] is False
 
     @patch.object(AppleMailConnector, "_run_applescript")
+    def test_search_messages_no_filters(
+        self, mock_run: MagicMock, connector: AppleMailConnector
+    ) -> None:
+        """Test message search without filters generates valid AppleScript."""
+        mock_run.return_value = "12345|Test|sender@test.com|Mon Jan 1 2024|false"
+
+        connector.search_messages("Gmail", "INBOX")
+
+        # Verify the script does NOT contain invalid "whose true"
+        call_args = mock_run.call_args[0][0]
+        assert "whose true" not in call_args
+        # Should just get all messages without a whose clause
+        assert "messages of mailboxRef" in call_args
+
+    @patch.object(AppleMailConnector, "_run_applescript")
     def test_search_messages_with_filters(
         self, mock_run: MagicMock, connector: AppleMailConnector
     ) -> None:
@@ -124,7 +139,25 @@ class TestAppleMailConnector:
         assert 'sender contains "john@example.com"' in call_args
         assert 'subject contains "meeting"' in call_args
         assert "read status is false" in call_args
-        assert "items 1 thru 10" in call_args
+        # Note: limit is now applied in Python, not in AppleScript
+
+    @patch.object(AppleMailConnector, "_run_applescript")
+    def test_search_messages_with_limit(
+        self, mock_run: MagicMock, connector: AppleMailConnector
+    ) -> None:
+        """Test that limit is applied correctly in Python."""
+        # Return 20 messages
+        messages = []
+        for i in range(20):
+            messages.append(f"{i}|Subject {i}|sender@test.com|Mon Jan 1 2024|false")
+        mock_run.return_value = "\n".join(messages)
+
+        result = connector.search_messages("Gmail", "INBOX", limit=10)
+
+        # Should only return 10 messages (limited in Python)
+        assert len(result) == 10
+        assert result[0]["subject"] == "Subject 0"
+        assert result[9]["subject"] == "Subject 9"
 
     @patch.object(AppleMailConnector, "_run_applescript")
     def test_get_message(
