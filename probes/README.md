@@ -50,9 +50,47 @@ The probes require:
 - Format: German tax document (Umsatzsteuer-Voranmeldung)
 - All 7 unit tests passing
 
+## Search Messages Probes
+
+### ✅ `test_search_comprehensive.py` (RECOMMENDED)
+
+**Status**: ✅ Working
+**Purpose**: Comprehensive test of search_messages bug fix.
+
+```bash
+python probes/test_search_comprehensive.py [account_name]
+```
+
+This probe verifies:
+- Search with limit but no filters (previously broken)
+- Search with filters and limit
+- Search with filters only
+- Correct limit application
+
+**Test Results**: All tests pass ✅
+
+---
+
+### Other Search Probes
+
+- `test_search_fix.py` - Basic search fix verification
+- `test_search_no_limit.py` - Tests search without limit
+- `debug_search.py` - Displays generated AppleScript for debugging
+
 ## Known Issues
 
-1. **search_messages() bug**: The function generates invalid AppleScript ("whose true") when no filters are provided
-2. **Message ID format**: Direct AppleScript message IDs don't match the format expected by `get_attachments()`
+### ✅ FIXED: search_messages() bug
 
-These issues don't affect the core text extraction functionality, which works correctly when attachments are accessed properly.
+**Status**: ✅ Fixed in commit a1002c9
+
+The function previously generated invalid AppleScript ("whose true") when no filters were provided and had issues with the "items 1 thru N" syntax. This has been fixed by:
+1. Omitting the "whose" clause when no conditions exist
+2. Applying limits in Python instead of AppleScript
+
+### ⚠️ OPEN: Message ID format mismatch
+
+**Status**: ⚠️ Open issue
+
+Direct AppleScript message IDs don't match the format expected by `get_attachments()`. This doesn't affect normal usage through the MCP server but causes issues when testing with direct AppleScript message ID retrieval.
+
+**Workaround**: Use the search_messages() function to get properly formatted message IDs.
