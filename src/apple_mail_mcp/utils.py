@@ -118,6 +118,47 @@ def validate_email(email: str) -> bool:
     return bool(re.match(pattern, email))
 
 
+def validate_message_id(message_id: str) -> bool:
+    """
+    Validate Apple Mail message ID format.
+
+    Message IDs should be reasonable length alphanumeric strings,
+    potentially with dashes and underscores.
+
+    Args:
+        message_id: Message ID to validate
+
+    Returns:
+        True if valid format, False otherwise
+
+    Example:
+        >>> validate_message_id("12345")
+        True
+        >>> validate_message_id("ABC-123_def")
+        True
+        >>> validate_message_id("../../../etc/passwd")
+        False
+    """
+    # Empty or None is invalid
+    if not message_id:
+        return False
+
+    # Length check (reasonable limit for message IDs)
+    if len(message_id) > 255:
+        return False
+
+    # Should only contain alphanumeric, dash, and underscore
+    # No special chars, spaces, or path traversal attempts
+    if not re.match(r'^[A-Za-z0-9_-]+$', message_id):
+        return False
+
+    # Extra check: no path traversal patterns
+    if '..' in message_id or '/' in message_id or '\\' in message_id:
+        return False
+
+    return True
+
+
 def sanitize_input(value: Any) -> str:
     """
     Sanitize user input for safety.

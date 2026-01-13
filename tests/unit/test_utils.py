@@ -107,6 +107,38 @@ class TestValidateEmail:
         assert validate_email("user example.com") is False
 
 
+class TestValidateMessageId:
+    """Tests for validate_message_id."""
+
+    def test_valid_numeric_id(self) -> None:
+        from apple_mail_mcp.utils import validate_message_id
+        assert validate_message_id("12345") is True
+
+    def test_valid_alphanumeric_id(self) -> None:
+        from apple_mail_mcp.utils import validate_message_id
+        assert validate_message_id("ABC-123_def") is True
+
+    def test_invalid_empty_id(self) -> None:
+        from apple_mail_mcp.utils import validate_message_id
+        assert validate_message_id("") is False
+
+    def test_invalid_too_long(self) -> None:
+        from apple_mail_mcp.utils import validate_message_id
+        long_id = "a" * 300
+        assert validate_message_id(long_id) is False
+
+    def test_invalid_special_chars(self) -> None:
+        from apple_mail_mcp.utils import validate_message_id
+        assert validate_message_id("id@with!special#chars") is False
+        assert validate_message_id("id with spaces") is False
+        assert validate_message_id("id/with/slashes") is False
+
+    def test_invalid_path_traversal(self) -> None:
+        from apple_mail_mcp.utils import validate_message_id
+        assert validate_message_id("../../../etc/passwd") is False
+        assert validate_message_id("..\\..\\windows\\system32") is False
+
+
 class TestSanitizeInput:
     """Tests for sanitize_input."""
 
